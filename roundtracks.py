@@ -1,8 +1,10 @@
+import argparse
 from board import Board, floatToString
 import math
 from copy import copy
 from collections import defaultdict
 from line import Line, dist, add, sub, dot, intersect
+import os
 
 def subdivideTracks(tracks, radius = 0.5, radiusWidthMultiplier = 0.5, maxRadius = 3, 
                     minAngle = 360.0 / 64.0, minLength = 0.1, numIterations = 4):
@@ -212,9 +214,30 @@ def smoothMultiWayJunctions(tracks, board, radius = 0.5, radiusWidthMultiplier =
                     #t.length -= s
                     processedPoints.add((t.start.x, t.start.y))
 
-board = Board()
-board.load('Pi G-Code HAT_2021-03-13.json')
-for tracks in board.tracksByNetAndLayer.values():
-    #smoothMultiWayJunctions(tracks, board)
-    subdivideTracks(tracks)
-board.save('smoothed.json')
+def main():
+    parser = argparse.ArgumentParser(description = "Round off the corners of copper tracks in an EasyEDA board json file")
+    parser.add_argument('filename', help="input file")
+    parser.add_argument('outputfile', help="outfile file", nargs="?")
+    parser.add_argument('--radius', help="Radius to round 90 degree corners to in mils", type=float, default=5.0)
+    parser.add_argument('--radiusWidthMultiplier', help="Corner radius is expanded by the width of the track multiplied by this value", type=float, default=0.5)
+    parser.add_argument('--maxRadius', help="Maximum corner radius (in mils)", type=float, default=30.0)
+    parser.add_argument('--minAngle', help="Stop rounding when angle between two tracks is smaller than this", type=float, default=360.0/64.0)
+    parser.add_argument('--minLength', help="Stop rounding when track segments are shorter than this (mils)", type=float, default=1.0)
+    parser.add_argument('--iterations', help="Number of passes to make over each track during smoothing", type=int, default=4)
+    parser.add_argument('--multiway', help="Run multi-way junction arc generation algorithm ", type=bool, default=False)
+    args = parser.parse_args()
+    board = Board()
+    board.load(args.filename)
+    for tracks in board.tracksByNetAndLayer.values():
+        if args.multiway:
+            smoothMultiWayJunctions(tracks, board, args.radius * 0.1, args.radiusWidthMultiplier, args.maxRadius * 0.1)
+        subdivideTracks(tracks, args.radius * 0.1, args.radiusWidthMultiplier, args.maxRadius * 0.1,
+            args.minAngle, args.minLength * 0.1, args.iterations)
+    outname = args.outputfile
+    if not outname:
+        name, ext = os.path.splitext(args.filename)
+        outname = name + '_smoothed' + ext
+    board.save(outname)
+
+if __name__ == '__main__':
+    main()
