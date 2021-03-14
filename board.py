@@ -1,5 +1,5 @@
 import json
-from line import Line, Vector, cleanupColinearTrackPair, splitIntersectingLines
+from line import Line, Vector, cleanupColinearTrackPair, splitIntersectingLines, getIslands
 from copy import copy
 from collections import defaultdict
 
@@ -13,6 +13,7 @@ class Board:
         self.loadTracks()
         self.cleanupColinearTracks()
         self.splitIntersectingLines()
+        self.assignIslands()
 
     def save(self, filename):
         self.saveTracks()
@@ -20,15 +21,19 @@ class Board:
             json.dump(self.board, f, indent=2, sort_keys=False,ensure_ascii=False)
 
     def cleanupColinearTracks(self):
-        for _, tracks in self.tracksByNetAndLayer.items():
+        for tracks in self.tracksByNetAndLayer.values():
             for t in tracks:
                 for t2 in tracks:
                     if cleanupColinearTrackPair(t, t2, tracks):
                         break
 
     def splitIntersectingLines(self):
-        for _, tracks in self.tracksByNetAndLayer.items():
+        for tracks in self.tracksByNetAndLayer.values():
             splitIntersectingLines(tracks)
+
+    def assignIslands(self):
+        for tracks in self.tracksByNetAndLayer.values():
+            getIslands(tracks)
 
     def getShapeId(self):
         self.highestShapeId += 1
