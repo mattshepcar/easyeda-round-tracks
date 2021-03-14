@@ -73,7 +73,7 @@ def findIntersections(tracks):
         if t.length > 0:
             intersections[(t.start.x, t.start.y, t.width)].append(t)
             intersections[(t.end.x, t.end.y, t.width)].append(t)
-    unsuitableIntersections = set() #[]
+    unsuitableIntersections = []
     for key in list(intersections):
         tracksHere = intersections[key]
         if len(tracksHere) < 2:
@@ -87,92 +87,101 @@ def findIntersections(tracks):
             if island != t.island:
                 if t.distanceTo(p) < (t.width + width) * .5: # and t.i == 0
                     intersections.pop(key)
-                    #unsuitableIntersections.append(tracksHere)
-                    unsuitableIntersections.update(tracksHere)
+                    unsuitableIntersections.append(tracksHere)
                     break
-    return intersections, list(unsuitableIntersections)
+    return intersections, unsuitableIntersections
 
-def addArcsBetweenTracks(tracks, board, splits, radius = 0.5, radiusWidthMultiplier = 0.5, maxRadius = 3, 
+def findPairs(trackSets):
+    pairs = set()
+    for tracks in trackSets:
+        for i, t0 in enumerate(tracks):
+            for t1 in tracks[i + 1:]:
+                if id(t0) < id(t1):
+                    pairs.add((t0, t1))
+                else:
+                    pairs.add((t1, t0))
+    return pairs
+
+def addArcsBetweenTracks(trackSets, board, splits, radius = 0.5, radiusWidthMultiplier = 0.5, maxRadius = 3, 
                         minAngle = 360.0 / 64.0, checkIslands = True):
     maxCosTheta = math.cos(math.radians(minAngle))
-    for i, t0 in enumerate(tracks):
-        for t1 in tracks[i + 1:]:
-            if checkIslands and t0.island == t1.island:
-                continue
-            # check angle
-            if dot(t0.dir, t1.dir) > maxCosTheta:
-                continue
-            # check intersection
-            ip = intersect(t0, t1, bound0=False, bound1=False)
-            if not ip:
-                continue
-            if t0.distanceTo(ip) > t1.width * .5:
-                continue
-            if t1.distanceTo(ip) > t0.width * .5:
-                continue
-            # choose width of arc
-            w = min(t0.width, t1.width)
-            # test each of the four corners of the intersection
-            for i in range(4):
-                edge0, edge1 = copy(t0), copy(t1)
-                if i & 1: 
-                    edge0.reverse()
-                if i & 2: 
-                    edge1.reverse()
-                # ensure correct orientation of corner
-                if cross(edge0.dir, edge1.dir) > 0:
-                    edge0, edge1 = edge1, edge0
+    for t0, t1 in findPairs(trackSets):
+        if checkIslands and t0.island == t1.island:
+            continue
+        # check angle
+        if dot(t0.dir, t1.dir) > maxCosTheta:
+            continue
+        # check intersection
+        ip = intersect(t0, t1, bound0=False, bound1=False)
+        if not ip:
+            continue
+        if t0.distanceTo(ip) > t1.width * .5:
+            continue
+        if t1.distanceTo(ip) > t0.width * .5:
+            continue
+        # choose width of arc
+        w = min(t0.width, t1.width)
+        # test each of the four corners of the intersection
+        for i in range(4):
+            edge0, edge1 = copy(t0), copy(t1)
+            if i & 1: 
+                edge0.reverse()
+            if i & 2: 
+                edge1.reverse()
+            # ensure correct orientation of corner
+            if cross(edge0.dir, edge1.dir) > 0:
+                edge0, edge1 = edge1, edge0
 
-                # push the thinner edge to the correct side
-                if edge0.width > edge1.width:
-                    edge0.start = add(edge0.start, edge0.vecToEdge(edge0.width - w))
-                    edge0.end   = add(edge0.end,   edge0.vecToEdge(edge0.width - w))
-                elif edge1.width > edge0.width:
-                    edge1.start = add(edge1.start, edge1.vecToEdge(edge1.width - w))
-                    edge1.end   = add(edge1.end,   edge1.vecToEdge(edge1.width - w))
+            # push the thinner edge to the correct side
+            if edge0.width > edge1.width:
+                edge0.start = add(edge0.start, edge0.vecToEdge(edge0.width - w))
+                edge0.end   = add(edge0.end,   edge0.vecToEdge(edge0.width - w))
+            elif edge1.width > edge0.width:
+                edge1.start = add(edge1.start, edge1.vecToEdge(edge1.width - w))
+                edge1.end   = add(edge1.end,   edge1.vecToEdge(edge1.width - w))
 
-                # find the inside corner
-                corner = intersect(edge0, edge1, bound0=False, bound1=False)
-                edge0.start = corner
-                edge0.update()
-                edge1.end = edge1.start
-                edge1.start = corner
-                edge1.update()
-                # skip if corner is not on the correct side - TODO: could be doubly backwards? need two checks with the corner vert?
-                if cross(edge0.dir, edge1.dir) <= 0:
-                    continue
-                # desired radius
-                r = w * .5 + radius + w * radiusWidthMultiplier
-                # clamp to ends of tracks
-                r = min(r, edge0.length, edge1.length)
-                if r <= w * .5:
-                    continue
-                # generate arc
-                p1 = edge0.pointOnLine(r)
-                p2 = edge1.pointOnLine(r)
-                cos2t = .5 + .5 * dot(edge0.dir, edge1.dir)
-                if cos2t < .0001:
-                    continue
-                r = math.sqrt(r * r * (1 - cos2t) / cos2t)
-                arc = f"ARC~{floatToString(w)}~{t0.layer}~{t0.net}~M "
-                arc += f"{floatToString(round(p1.x, 5))} "
-                arc += f"{floatToString(round(p1.y, 5))} "
-                arc += f"A {r} {r} 0 0 0 "
-                arc += f"{floatToString(round(p2.x, 5))} "
-                arc += f"{floatToString(round(p2.y, 5))} "
-                arc += f"~~{board.getShapeId()}~0"
-                board.addShape(arc)
-                # split tracks so that the subdivision algorithm doesn't
-                # round past the arc
-                # TODO: need to tag/lock tracks so they don't get subdivided
-                if abs(dot(t0.dir, edge0.dir)) < abs(dot(t0.dir, edge1.dir)):
-                    p1, p2 = p2, p1
-                d0 = t0.projectedLength(p1)
-                if d0 > 0.0 and d0 < t0.length:
-                    splits[t0].append(d0)
-                d1 = t1.projectedLength(p2)
-                if d1 > 0.0 and d1 < t1.length:
-                    splits[t1].append(d1)
+            # find the inside corner
+            corner = intersect(edge0, edge1, bound0=False, bound1=False)
+            edge0.start = corner
+            edge0.update()
+            edge1.end = edge1.start
+            edge1.start = corner
+            edge1.update()
+            # skip if corner is not on the correct side - TODO: could be doubly backwards? need two checks with the corner vert?
+            if cross(edge0.dir, edge1.dir) <= 0:
+                continue
+            # desired radius
+            r = w * .5 + radius + w * radiusWidthMultiplier
+            # clamp to ends of tracks
+            r = min(r, edge0.length, edge1.length)
+            if r <= w * .5:
+                continue
+            # generate arc
+            p1 = edge0.pointOnLine(r)
+            p2 = edge1.pointOnLine(r)
+            cos2t = .5 + .5 * dot(edge0.dir, edge1.dir)
+            if cos2t < .0001:
+                continue
+            r = math.sqrt(r * r * (1 - cos2t) / cos2t)
+            arc = f"ARC~{floatToString(w)}~{t0.layer}~{t0.net}~M "
+            arc += f"{floatToString(round(p1.x, 5))} "
+            arc += f"{floatToString(round(p1.y, 5))} "
+            arc += f"A {r} {r} 0 0 0 "
+            arc += f"{floatToString(round(p2.x, 5))} "
+            arc += f"{floatToString(round(p2.y, 5))} "
+            arc += f"~~{board.getShapeId()}~0"
+            board.addShape(arc)
+            # split tracks so that the subdivision algorithm doesn't
+            # round past the arc
+            # TODO: need to tag/lock tracks so they don't get subdivided
+            if abs(dot(t0.dir, edge0.dir)) < abs(dot(t0.dir, edge1.dir)):
+                p1, p2 = p2, p1
+            d0 = t0.projectedLength(p1)
+            if d0 > 0.0 and d0 < t0.length:
+                splits[t0].append(d0)
+            d1 = t1.projectedLength(p2)
+            if d1 > 0.0 and d1 < t1.length:
+                splits[t1].append(d1)
 
 def main():
     parser = argparse.ArgumentParser(description = "Round off the corners of copper tracks in an EasyEDA board json file")
@@ -196,12 +205,7 @@ def main():
                 args.radius * 0.1, args.radiusWidthMultiplier, 
                 args.maxRadius * 0.1, args.minAngle,
                 checkIslands = False)
-            #for t in cornerArcSets:
-            #    addArcsBetweenTracks(t, board, splits, 
-            #        args.radius * 0.1, args.radiusWidthMultiplier, 
-            #        args.maxRadius * 0.1, args.minAngle,
-            #        checkIslands = False)
-            addArcsBetweenTracks(tracks, board, splits, 
+            addArcsBetweenTracks([tracks], board, splits, 
                 args.radius * 0.1, args.radiusWidthMultiplier, 
                 args.maxRadius * 0.1, args.minAngle,
                 checkIslands = True)
