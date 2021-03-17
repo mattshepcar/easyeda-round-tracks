@@ -82,8 +82,7 @@ def __FindTouchingTrack(t1, endpoint, trackLookup):
             return t
     return None
 
-def __ComputePoints(track, via, hpercent, vpercent, segs, follow_tracks,
-                    trackLookup):
+def __ComputePoints(track, via, hpercent, vpercent, segs, trackLookup):
     """Compute all teardrop points"""
     start = track.start
     end = track.end
@@ -129,8 +128,6 @@ def __ComputePoints(track, via, hpercent, vpercent, segs, follow_tracks,
             n = l
 
         # if not long enough, attempt to walk back along the curved track
-        if not follow_tracks:
-            break
         t = __FindTouchingTrack(track, end, trackLookup)
         if not t:
             break
@@ -170,8 +167,12 @@ def __ComputePoints(track, via, hpercent, vpercent, segs, follow_tracks,
     else:
         return pointsToPath(pts)
 
-def SetTeardrops(pcb, tracks, vias, hpercent=50, vpercent=90, segs=10, follow_tracks=True):
+def SetTeardrops(pcb, tracks, vias, args):
     """Set teardrops on a teardrop free board"""
+    hpercent = args.teardropLength
+    vpercent = args.teardropWidth
+    segs = args.teardropSegs
+
     tracks = [t for t in tracks if t.length > 0]
     trackLookup = defaultdict(list)
     for t in tracks:
@@ -186,7 +187,6 @@ def SetTeardrops(pcb, tracks, vias, hpercent=50, vpercent=90, segs=10, follow_tr
             if t.width < via.diameter * .95:
                 # is the track entering/leaving the via?
                 if (dist(t.start, via.pos) < r) != (dist(t.end, via.pos) < r):
-                    path = __ComputePoints(t, via, hpercent, vpercent, segs,
-                                follow_tracks, trackLookup)
+                    path = __ComputePoints(t, via, hpercent, vpercent, segs, trackLookup)
                     if path:
                         pcb.addShape(f"SOLIDREGION~{t.layer}~{t.net}~{path}~solid~{pcb.getShapeId()}~~~~0")

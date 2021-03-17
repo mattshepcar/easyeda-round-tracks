@@ -15,14 +15,14 @@ def subdivideTracks(tracks, vias, board, args):
     minLength = args.minLength * 0.1
     for t in tracks:
         t.i = 0 # iteration number
+    #find all connected tracks
     intersections = findIntersections(tracks, vias, args)
-    # perform mitxela's track subdivision smoothing algorithm                 
+    # perform track subdivision smoothing algorithm as explained 
+    # here https://mitxela.com/projects/melting_kicad           
     for smoothpass in range(args.passes):
         # save original lengths
         for t in tracks:
            t.originalLength = t.length
-        #intersections = findIntersections(tracks, vias, args)
-        #find all connected tracks
         nextPassIntersections = defaultdict(list)
         for (x, y), tracksHere in intersections.items():
             # flip tracks such that all tracks start at the intersection point
@@ -85,7 +85,6 @@ def findIntersections(tracks, vias, args):
     #find all connected tracks
     intersections = defaultdict(list)
     for t in tracks:
-        #t.originalLength = t.length
         intersections[t.start].append(t)
         intersections[t.end].append(t)
 
@@ -135,27 +134,32 @@ def main():
     parser.add_argument('--minAngle', help="Stop rounding when angle between two tracks is smaller than this", type=float, default=5.0)
     parser.add_argument('--minLength', help="Stop rounding when track segments are shorter than this (mils)", type=float, default=2.5)
     parser.add_argument('--passes', help="Number of passes to make over each track during smoothing", type=int, default=3)
+    parser.add_argument('--teardropLength', help="Length of teardrops as a percentage of pad diameter", type=float, default=50)
+    parser.add_argument('--teardropWidth', help="Width of teardrops as a percentage", type=float, default=90)
+    parser.add_argument('--teardropSegs', help="Number of curve segments to create for teardrops", type=int, default=10)
     parser.add_argument('--smoothnway', help="Apply rounding on n-way junctions (fillets will normally work better)", action='store_true')
-    parser.add_argument('--fillet', help="Add fillets on any corners that couldn't be rounded", action='store_true')
-    parser.add_argument('--teardrops', help="Add teardrops", action='store_true')
+    parser.add_argument('--nosubdivide', help="Don't run track smoothing subdivision algorithm", action='store_true')
+    parser.add_argument('--nofillet', help="Don't add fillets on any corners that couldn't be rounded", action='store_true')
+    parser.add_argument('--noteardrops', help="Don't add teardrops", action='store_true')
     args = parser.parse_args()
     print(f'Loading board "{args.filename}"')
     board = Board()
     board.load(args.filename)
-    print(f"Subdividing tracks")
-    for tracks in board.tracksByNetAndLayer.values():
-        net = tracks[0].net
-        vias = board.viasByNet.get(net, [])
-        subdivideTracks(tracks, vias, board, args)
-    if args.fillet:
+    if not args.nosubdivide:
+        print(f"Subdividing tracks")
+        for tracks in board.tracksByNetAndLayer.values():
+            net = tracks[0].net
+            vias = board.viasByNet.get(net, [])
+            subdivideTracks(tracks, vias, board, args)
+    if not args.nofillet:
         print(f"Applying fillets")
         for tracks in board.tracksByNetAndLayer.values():
             filletTracks(tracks, board, args)
-    if args.teardrops:
+    if not args.noteardrops:
         print(f"Applying teardrops")
         for tracks in board.tracksByNetAndLayer.values():
             vias = board.viasByNet.get(tracks[0].net, [])
-            SetTeardrops(board, tracks, vias)
+            SetTeardrops(board, tracks, vias, args)
 
     outname = args.outputfile
     if not outname:
