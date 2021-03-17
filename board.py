@@ -1,18 +1,30 @@
 import json
-from line import Line, Vector, cleanupColinearTrackPair, splitIntersectingLines, getIslands
+from line import Line, Vector, cleanupColinearTrackPair, splitIntersectingLines, getIslands, makePolyLines, dist
 from copy import copy
-from collections import defaultdict
+from collections import defaultdict, namedtuple
+import math
 
 def floatToString(inputValue):
     return ('%f' % inputValue).rstrip('0').rstrip('.')
+def pointToStr(pt):
+    return f"{floatToString(round(pt.x + 4000, 5))} {floatToString(round(pt.y + 3000, 5))}"
+
+Transform = namedtuple('Transform', 'pos angle')
+Via = namedtuple('Via', 'pos diameter drill')
+
+def Pos(x, y, tx):
+    return Vector(float(x) - 4000, float(y) - 3000)
 
 class Board:
     def load(self, filename):
         self.nextTrackId = 0
         self.board = json.load(open(filename, encoding='utf-8'))
         self.loadTracks()
-        self.cleanupColinearTracks()
+        #print("Cleaning up overlapping tracks")
+        #self.cleanupColinearTracks()
+        print("Splitting intersecting tracks")
         self.splitIntersectingLines()
+        print("Identifying connected track sections")
         self.assignIslands()
 
     def save(self, filename):
@@ -45,36 +57,55 @@ class Board:
     def loadTracks(self):
         self.highestShapeId = 0
         self.tracksByNetAndLayer = defaultdict(list)
-        for shapeIndex, shape in enumerate(self.board['shape']):
+        self.viasByNet = defaultdict(list)
+        self.loadShapes(self.board['shape'])
+
+    def loadShapes(self, shapes, tx=Transform(Vector(0, 0), 0)):
+        for shapeIndex, shape in enumerate(shapes):
             shape = shape.split('~')
-            if shape[0] == 'TRACK':
-                width, layer, net, coords, trackId, locked = shape[1:]
+            if shape[0] == 'LIB':
+                x, y, attributes, rotation, importFlag, shapeId, _, _, _, locked = shape[1:11]
+                shapeList = '~'.join(shape).split('#@$')[1:]
+                rotation = float(rotation or 0)
+                self.loadShapes(shapeList, Transform(Pos(x, y, tx), rotation + tx.angle))
+            elif shape[0] == 'TRACK':
+                width, layer, net, coords, shapeId, locked = shape[1:]
                 if layer not in ('1', '2'):
                     continue
                 tracks = self.tracksByNetAndLayer[net+'~'+layer]
                 coords = [float(c) for c in coords.split(' ')]
                 width = float(width)
-                start = Vector(coords[0], coords[1])
+                start = Pos(coords[0], coords[1], tx)
                 for i in range(2, len(coords), 2):
-                    t = Line()
+                    end = Pos(coords[i], coords[i + 1], tx)
+                    t = Line(start, end)
                     t.shapeIndex = shapeIndex
-                    t.id = trackId
+                    t.id = shapeId
                     t.width = width
                     t.layer = layer
                     t.net = net
-                    t.start = start
-                    t.end = Vector(coords[i], coords[i + 1])
                     t.locked = locked
-                    start = copy(t.end)
+                    start = copy(end)
                     if t.update():
                         tracks.append(t)
-            elif shape[0] != 'LIB':
+            elif shape[0] == 'VIA':
+                x, y, diameter, net, drill, shapeId, locked = shape[1:]
+                pos = Pos(x, y, tx)
+                self.viasByNet[net].append(Via(pos, float(diameter), float(drill)))
+            elif shape[0] == 'PAD':
+                (shapeType, x, y, w, h, layer, net, num, holeRadius, points, 
+                 rotation, shapeId, holeLength, holePoints, plated, locked, 
+                 pasteExpansion, solderMaskExpansion, _) = shape[1:]
+                pos = Pos(x, y, tx)
+                if float(holeRadius):
+                    self.viasByNet[net].append(Via(pos, min(float(w), float(h)), float(holeRadius)))
+            else:
                 for field in shape:
                     if field.startswith('gge'):
-                        trackId = field
+                        shapeId = field
                         break
-            if trackId.startswith('gge'):
-                numericId = int(trackId[3:])
+            if shapeId.startswith('gge') and shape[0] != 'LIB':
+                numericId = int(shapeId[3:])
                 if numericId > self.highestShapeId:
                     self.highestShapeId = numericId
 
@@ -86,43 +117,19 @@ class Board:
         for shapeIndex, tracks in tracksByShape.items():
             track = tracks[0]
             trackId = track.id
-            while tracks:
-                coords = [tracks[0].start]
-                while tracks:
-                    l = len(tracks)
-                    for i, t in enumerate(tracks):
-                        if t.start.x == coords[-1].x and t.start.y == coords[-1].y:
-                            coords.append(t.end)
-                            tracks.pop(i)
-                            break
-                        elif t.end.x == coords[-1].x and t.end.y == coords[-1].y:
-                            coords.append(t.start)
-                            tracks.pop(i)
-                            break
-                    if l == len(tracks):
-                        for i, t in enumerate(tracks):
-                            if t.start.x == coords[0].x and t.start.y == coords[0].y:
-                                coords.insert(0, t.end)
-                                tracks.pop(i)
-                                break
-                            elif t.end.x == coords[0].x and t.end.y == coords[0].y:
-                                coords.insert(0, t.start)
-                                tracks.pop(i)
-                                break
-                        if l == len(tracks):
-                            break
+            for coords in makePolyLines(tracks):
+                if shapeIndex is None:
+                    trackId = self.getShapeId()
                 shape = '~'.join((
                     'TRACK',
                     floatToString(track.width),
                     track.layer,
                     track.net,
-                    ' '.join(('%s %s' % (floatToString(round(c.x, 5)), floatToString(round(c.y, 5))) for c in coords)),
+                    ' '.join((pointToStr(c) for c in coords)),
                     trackId,
                     track.locked))
                 if shapeIndex != None:
                     self.board['shape'][shapeIndex] = shape
+                    shapeIndex = None
                 else:
                     self.addShape(shape)
-                if tracks:
-                    shapeIndex = None
-                    trackId = self.getShapeId()

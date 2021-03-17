@@ -2,29 +2,48 @@ import math
 from collections import namedtuple, defaultdict
 from copy import copy
 
-Vector = namedtuple('Vector', 'x y')
+class Vector(namedtuple('Vector', 'x y')):
+    def __add__(self, other):
+        return Vector(self.x + other.x, self.y + other.y)
+    def __sub__(self, other):
+        return Vector(self.x - other.x, self.y - other.y)
+    def __mul__(self, other):
+        return Vector(self.x * other, self.y * other)
+
 def dot(p0, p1):
     return p0.x * p1.x + p0.y * p1.y
 def cross(p0, p1):
     return p0.x * p1.y - p0.y * p1.x
+def lengthsq(p):
+    return dot(p,p)
 def length(p):
-    return math.sqrt(dot(p,p))
+    return math.sqrt(lengthsq(p))
 def clamp(x, minx, maxx):
     return max(minx, min(x, maxx))
 def add(p0, p1):
     return Vector(p0.x + p1.x, p0.y + p1.y)
 def sub(p0, p1):
     return Vector(p0.x - p1.x, p0.y - p1.y)
+def distsq(p0, p1):
+    return lengthsq(sub(p0, p1))
 def dist(p0, p1):
-    return length(sub(p0, p1))    
+    return length(sub(p0, p1))
+def scale(v, factor):
+    return Vector(v.x * factor, v.y * factor)
+def normalize(v):
+    return scale(v, 1.0 / length(v))
 
 class Line:
+    def __init__(self, p0, p1):
+        self.start = p0 if isinstance(p0, Vector) else Vector(*p0)
+        self.end = p1 if isinstance(p1, Vector) else Vector(*p1)
+        self.update()
     def update(self):
         d = sub(self.end, self.start)
         self.length = length(d)
         if self.length < 0.0001:
             return False
-        self.dir = Vector(d.x / self.length, d.y / self.length)
+        self.dir = scale(d, 1.0 / self.length)
         return True
     def GetWidth(self):
         return self.width
@@ -56,6 +75,10 @@ class Line:
         self.end = p
         self.update()
         return newTrack
+    def bounds(self, expand=0):
+        w = self.width * .5 + expand
+        return (Vector(min(self.start.x, self.end.x) - w, min(self.start.y, self.end.y - w)),
+                Vector(max(self.start.x, self.end.x) + w, max(self.start.y, self.end.y) + w))
 
 def intersect(t0, t1, bound0=True, bound1=True):
     t1perp = Vector(t1.end.y - t1.start.y, t1.start.x - t1.end.x)
@@ -95,7 +118,7 @@ def cleanupColinearTrackPair(t, t2, tracks):
             s, e = e, s
         # overlapping?
         if e > 0.0001 and s < t.length - 0.0001:
-            print('Merging tracks %s and %s' % (t, t2))
+            #print('Merging tracks %s and %s' % (t, t2))
             s = min(0, s)
             e = max(t.length, e)
             t2.start = t.pointOnLine(s)
@@ -155,14 +178,19 @@ def applySplits(tracks, splits):
                 tracks.append(t.split(t.pointOnLine(d)))
 
 def splitIntersectingLines(tracks):
+    trackLookup = kdboxtree(list((t.bounds(), t) for t in tracks))
+    needUpdate = False
     for t2 in tracks:
-        for t in tracks:
+        for t in kdboxinside(trackLookup, t2.bounds()):
             if t == t2:
                 continue
             if t.width != t2.width:
                 continue
-            if distFromEnd(t, t2.start) == 0 or distFromEnd(t, t2.end) == 0:
+            if (t.start == t2.start or t.start == t2.end or
+                t.end == t2.start or t.end == t2.end):
                 continue
+            #if distFromEnd(t, t2.start) == 0 or distFromEnd(t, t2.end) == 0:
+            #    continue
             ip = intersect(t, t2, bound0=False)
             if not ip:
                 continue
@@ -170,24 +198,35 @@ def splitIntersectingLines(tracks):
             if d2 > 0 and d2 < t2.length:
                 d = t.projectedLength(ip, bounded=False)
                 if d > -t2.width * .5 and d < 0:
+                    needUpdate = True
                     t.start = ip
                     t.update()
                 elif d > t.length and d < t.length + t2.width * .5:
+                    needUpdate = True
                     t.end = ip
                     t.update()
+    if needUpdate:
+        trackLookup = kdboxtree(list((t.bounds(), t) for t in tracks))
+    mindist = 0.1
+
     splits = defaultdict(list)
-    for i, t in enumerate(tracks):
-        for t2 in tracks[:i]:
+    for t in tracks:
+        for t2 in kdboxinside(trackLookup, t2.bounds()):
+            if id(t) <= id(t2):
+                continue
             if t.width != t2.width:
                 continue
             ip = intersect(t, t2)
             if ip:
-                if distFromEnd(t, ip) > 0:
-                    splits[t].append(t.projectedLength(ip))
-                    #tracks.append(t.split(ip))
-                if distFromEnd(t2, ip) > 0:
-                    splits[t2].append(t2.projectedLength(ip))
-                    #tracks.append(t2.split(ip))
+                for s in (t, t2):
+                    if dist(s.start, ip) < mindist:
+                        s.start = ip
+                        s.update()
+                    elif dist(s.end, ip) < mindist:
+                        s.end = ip
+                        s.update()
+                    else:
+                        splits[s].append(s.projectedLength(ip))
     applySplits(tracks, splits)
 
 class Island:
@@ -223,3 +262,100 @@ def getIslands(tracks):
     for islandsByPosition in islandsByWidth.values():
         islands.update(islandsByPosition.values())
     return islands
+
+def makePolyLines(lines):
+    polylines = []
+    while lines:
+        coords = [lines[0].start]
+        while lines:
+            l = len(lines)
+            for i, t in enumerate(lines):
+                if t.start.x == coords[-1].x and t.start.y == coords[-1].y:
+                    coords.append(t.end)
+                    lines.pop(i)
+                    break
+                elif t.end.x == coords[-1].x and t.end.y == coords[-1].y:
+                    coords.append(t.start)
+                    lines.pop(i)
+                    break
+            if l == len(lines):
+                for i, t in enumerate(lines):
+                    if t.start.x == coords[0].x and t.start.y == coords[0].y:
+                        coords.insert(0, t.end)
+                        lines.pop(i)
+                        break
+                    elif t.end.x == coords[0].x and t.end.y == coords[0].y:
+                        coords.insert(0, t.start)
+                        lines.pop(i)
+                        break
+                if l == len(lines):
+                    break
+        polylines.append(coords)
+    return polylines
+
+KdNode = namedtuple("KdNode", "pos left right")
+def kdtree(points, depth = 0):
+    if len(points) < 4:
+        return points
+    points.sort(key=lambda p: p[0][depth & 1])
+    median = len(points) // 2
+    return KdNode(
+        pos=points[median][0][depth & 1],
+        left=kdtree(points[:median], depth + 1),
+        right=kdtree(points[median:], depth + 1))
+def kdnear(tree, pos, maxDistance, depth = 0):
+    if isinstance(tree, KdNode):
+        points = []
+        if pos[depth & 1] <= tree.pos + maxDistance:
+            points += kdnear(tree.left, pos, maxDistance, depth + 1)
+        if pos[depth & 1] >= tree.pos - maxDistance:
+            points += kdnear(tree.right, pos, maxDistance, depth + 1)
+        return points
+    return [p for p in tree if distsq(p[0], pos) < maxDistance * maxDistance]
+def kdinside(tree, bounds, depth = 0):
+    minpos, maxpos = bounds
+    points = []
+    pending = [(tree, 0)]
+    while pending:
+        tree, depth = pending.pop()
+        while isinstance(tree, KdNode):
+            if minpos[depth & 1] <= tree.pos:
+                if maxpos[depth & 1] >= tree.pos:
+                    pending.append((tree.right, depth + 1))
+                tree = tree.left
+            else:
+                tree = tree.right
+            depth += 1
+        points += [p for p in tree 
+             if p[0][0] >= minpos[0] and p[0][0] <= maxpos[0] and 
+                p[0][1] >= minpos[1] and p[0][1] <= maxpos[1]]
+    return points
+
+KdBoxNode = namedtuple("KdBoxNode", "maxleft minright left right")
+def kdboxtree(boxes, depth = 0):
+    if len(boxes) < 4:
+        return boxes
+    boxes.sort(key=lambda p: p[0][0][depth & 1] + p[0][1][depth & 1])
+    median = len(boxes) // 2
+    return KdBoxNode(
+        maxleft=max(p[0][1][depth & 1] for p in boxes[:median]),
+        minright=min(p[0][0][depth & 1] for p in boxes[median:]),
+        left=kdboxtree(boxes[:median], depth + 1),
+        right=kdboxtree(boxes[median:], depth + 1))
+def kdboxinside(tree, bounds, depth = 0):
+    minpos, maxpos = bounds
+    if isinstance(tree, KdBoxNode):
+        objs = []
+        if tree.maxleft > minpos[depth & 1]:
+            objs += kdboxinside(tree.left, bounds, depth + 1)
+        if tree.minright < maxpos[depth & 1]:
+            objs += kdboxinside(tree.right, bounds, depth + 1)
+        return objs
+    return [obj for (objmin, objmax), obj in tree 
+                if objmin[0] <= maxpos[0] and objmax[0] >= minpos[0] and 
+                   objmin[1] <= maxpos[1] and objmax[1] >= minpos[1]]
+
+
+def kdnearest(tree, pos, maxDistance):
+    points = kdnear(tree, pos, maxDistance)
+    return points[0] if points else None

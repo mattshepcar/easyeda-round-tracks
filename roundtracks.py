@@ -3,19 +3,28 @@ from board import Board, floatToString
 import math
 from copy import copy
 from collections import defaultdict
-from line import Line, Vector, dist, add, sub, dot, cross, intersect, applySplits
+from line import Line, Vector, dist, add, sub, dot, cross, intersect, applySplits, kdtree, kdnear, kdinside
+from fillettracks import filletTracks
+from teardrops import SetTeardrops
 import os
 
-def subdivideTracks(tracks, board, radius = 0.5, radiusWidthMultiplier = 0.5, maxRadius = 3, 
-                    minAngle = 360.0 / 64.0, minLength = 0.1, numIterations = 4):
-    maxCosTheta = math.cos(math.radians(minAngle))
+def subdivideTracks(tracks, vias, board, args):
+    maxCosTheta = math.cos(math.radians(args.minAngle))
+    radius = args.radius * 0.1
+    maxRadius = args.maxRadius * 0.1
+    minLength = args.minLength * 0.1
     for t in tracks:
         t.i = 0 # iteration number
+    intersections = findIntersections(tracks, vias, args)
     # perform mitxela's track subdivision smoothing algorithm                 
-    for smoothpass in range(numIterations):
+    for smoothpass in range(args.passes):
+        # save original lengths
+        for t in tracks:
+           t.originalLength = t.length
+        #intersections = findIntersections(tracks, vias, args)
         #find all connected tracks
-        intersections, _ = findIntersections(tracks)
-        for (x, y, width), tracksHere in intersections.items():
+        nextPassIntersections = defaultdict(list)
+        for (x, y), tracksHere in intersections.items():
             # flip tracks such that all tracks start at the intersection point
             island = tracksHere[0].island
             for t in tracksHere:
@@ -43,11 +52,12 @@ def subdivideTracks(tracks, board, radius = 0.5, radiusWidthMultiplier = 0.5, ma
             for t in range(len(tracksHere)):
                 t0, t1 = tracksHere[t - 1], tracksHere[t]
                 cosHalfTheta = math.sqrt(.5 + .5 * abs(dot(t0.dir, t1.dir)))
-                r = min(maxRadius, radius + radiusWidthMultiplier * t0.width, t0.length - minLength)
+                r = min(maxRadius, radius + args.radiusWidthMultiplier * t0.width, t0.length - minLength)
                 amountToShorten = min(shortestTrackLen / (2 * cosHalfTheta + 2), r)
                 if amountToShorten >= minLength:
                     t0.length -= amountToShorten
                     t0.start = t0.pointOnLine(amountToShorten)
+                    nextPassIntersections[t0.start].append(t0)
 
             #connect the new start points in a circle around the old center point
             for t in range(len(tracksHere)):
@@ -64,158 +74,94 @@ def subdivideTracks(tracks, board, radius = 0.5, radiusWidthMultiplier = 0.5, ma
                         t.i = smoothpass + 1
                         if t.update():
                             tracks.append(t)
+                            nextPassIntersections[t.start].append(t)
+                            nextPassIntersections[t.end].append(t)
+        intersections = nextPassIntersections
 
-def findIntersections(tracks):
+def findIntersections(tracks, vias, args):
+    # remove empty tracks
+    tracks = [t for t in tracks if t.length > 0]
+
     #find all connected tracks
     intersections = defaultdict(list)
     for t in tracks:
-        t.originalLength = t.length
-        if t.length > 0:
-            intersections[(t.start.x, t.start.y, t.width)].append(t)
-            intersections[(t.end.x, t.end.y, t.width)].append(t)
-    unsuitableIntersections = []
-    for key in list(intersections):
-        tracksHere = intersections[key]
-        if len(tracksHere) < 2:
-            intersections.pop(key)
-            continue
-        x, y, width = key
-        # don't perform smoothing if any unconnected tracks intersect this point
-        p = Vector(x, y)
-        island = tracksHere[0].island
-        for t in tracks:
-            if island != t.island:
-                if t.distanceTo(p) < (t.width + width) * .5: # and t.i == 0
-                    intersections.pop(key)
-                    unsuitableIntersections.append(tracksHere)
-                    break
-    return intersections, unsuitableIntersections
+        #t.originalLength = t.length
+        intersections[t.start].append(t)
+        intersections[t.end].append(t)
 
-def findPairs(trackSets):
-    pairs = set()
-    for tracks in trackSets:
-        for i, t0 in enumerate(tracks):
-            for t1 in tracks[i + 1:]:
-                if id(t0) < id(t1):
-                    pairs.add((t0, t1))
-                else:
-                    pairs.add((t1, t0))
-    return pairs
+    # remove intersections with fewer than 2 tracks
+    if args.smoothnway:
+        # only allow more than 2 tracks if n-way option is set
+        for pos in list(intersections):
+            tracksHere = intersections[pos]
+            if len(tracksHere) < 2:
+                intersections.pop(pos)
+    else:
+        for pos in list(intersections):
+            tracksHere = intersections[pos]
+            if len(tracksHere) != 2:
+                intersections.pop(pos)
 
-def addArcsBetweenTracks(trackSets, board, splits, radius = 0.5, radiusWidthMultiplier = 0.5, maxRadius = 3, 
-                        minAngle = 360.0 / 64.0, checkIslands = True):
-    maxCosTheta = math.cos(math.radians(minAngle))
-    for t0, t1 in findPairs(trackSets):
-        if checkIslands and t0.island == t1.island:
-            continue
-        # check angle
-        if dot(t0.dir, t1.dir) > maxCosTheta:
-            continue
-        # check intersection
-        ip = intersect(t0, t1, bound0=False, bound1=False)
-        if not ip:
-            continue
-        if t0.distanceTo(ip) > t1.width * .5:
-            continue
-        if t1.distanceTo(ip) > t0.width * .5:
-            continue
-        # choose width of arc
-        w = min(t0.width, t1.width)
-        # test each of the four corners of the intersection
-        for i in range(4):
-            edge0, edge1 = copy(t0), copy(t1)
-            if i & 1: 
-                edge0.reverse()
-            if i & 2: 
-                edge1.reverse()
-            # ensure correct orientation of corner
-            if cross(edge0.dir, edge1.dir) > 0:
-                edge0, edge1 = edge1, edge0
+    # make a kd-tree for faster searching
+    tracktree = kdtree(list(intersections.items()))
 
-            # push the thinner edge to the correct side
-            if edge0.width > edge1.width:
-                edge0.start = add(edge0.start, edge0.vecToEdge(edge0.width - w))
-                edge0.end   = add(edge0.end,   edge0.vecToEdge(edge0.width - w))
-            elif edge1.width > edge0.width:
-                edge1.start = add(edge1.start, edge1.vecToEdge(edge1.width - w))
-                edge1.end   = add(edge1.end,   edge1.vecToEdge(edge1.width - w))
+    # remove intersections with vias    
+    for v in vias:
+        for pos, t in kdnear(tracktree, v.pos, v.diameter * .5):
+            intersections.pop(pos)
 
-            # find the inside corner
-            corner = intersect(edge0, edge1, bound0=False, bound1=False)
-            edge0.start = corner
-            edge0.update()
-            edge1.end = edge1.start
-            edge1.start = corner
-            edge1.update()
-            # skip if corner is not on the correct side - TODO: could be doubly backwards? need two checks with the corner vert?
-            if cross(edge0.dir, edge1.dir) <= 0:
+    # remove junctions with unrelated tracks intersecting them
+    maxWidth = max(t.width for t in tracks)
+    for t1 in tracks:
+        # expand the bounding box by the max track width to find all track intersections
+        for pos, othertracks in kdinside(tracktree, t1.bounds(expand = maxWidth * .5)):
+            if pos not in intersections:
                 continue
-            # desired radius
-            r = w * .5 + radius + w * radiusWidthMultiplier
-            # clamp to ends of tracks
-            r = min(r, edge0.length, edge1.length)
-            if r <= w * .5:
-                continue
-            # generate arc
-            p1 = edge0.pointOnLine(r)
-            p2 = edge1.pointOnLine(r)
-            cos2t = .5 + .5 * dot(edge0.dir, edge1.dir)
-            if cos2t < .0001:
-                continue
-            r = math.sqrt(r * r * (1 - cos2t) / cos2t)
-            arc = f"ARC~{floatToString(w)}~{t0.layer}~{t0.net}~M "
-            arc += f"{floatToString(round(p1.x, 5))} "
-            arc += f"{floatToString(round(p1.y, 5))} "
-            arc += f"A {r} {r} 0 0 0 "
-            arc += f"{floatToString(round(p2.x, 5))} "
-            arc += f"{floatToString(round(p2.y, 5))} "
-            arc += f"~~{board.getShapeId()}~0"
-            board.addShape(arc)
-            # split tracks so that the subdivision algorithm doesn't
-            # round past the arc
-            # TODO: need to tag/lock tracks so they don't get subdivided
-            if abs(dot(t0.dir, edge0.dir)) < abs(dot(t0.dir, edge1.dir)):
-                p1, p2 = p2, p1
-            d0 = t0.projectedLength(p1)
-            if d0 > 0.0 and d0 < t0.length:
-                splits[t0].append(d0)
-            d1 = t1.projectedLength(p2)
-            if d1 > 0.0 and d1 < t1.length:
-                splits[t1].append(d1)
+            for t2 in othertracks:
+                if t1.island != t2.island:
+                    if t1.distanceTo(pos) < (t1.width + t2.width) * .5: # and t.i == 0
+                        intersections.pop(pos)
+                        break
+
+    return intersections
 
 def main():
     parser = argparse.ArgumentParser(description = "Round off the corners of copper tracks in an EasyEDA board json file")
     parser.add_argument('filename', help="input file")
     parser.add_argument('outputfile', help="outfile file", nargs="?")
-    parser.add_argument('--radius', help="Radius to round 90 degree corners to in mils", type=float, default=5.0)
+    parser.add_argument('--radius', help="Radius to round 90 degree corners to (in mils)", type=float, default=5.0)
     parser.add_argument('--radiusWidthMultiplier', help="Corner radius is expanded by the width of the track multiplied by this value", type=float, default=0.5)
     parser.add_argument('--maxRadius', help="Maximum corner radius (in mils)", type=float, default=100.0)
-    parser.add_argument('--minAngle', help="Stop rounding when angle between two tracks is smaller than this", type=float, default=360.0/64.0)
+    parser.add_argument('--minAngle', help="Stop rounding when angle between two tracks is smaller than this", type=float, default=5.0)
     parser.add_argument('--minLength', help="Stop rounding when track segments are shorter than this (mils)", type=float, default=2.5)
-    parser.add_argument('--iterations', help="Number of passes to make over each track during smoothing", type=int, default=4)
-    parser.add_argument('--cornerarcs', help="Add arcs inside corners", action='store_true')
+    parser.add_argument('--passes', help="Number of passes to make over each track during smoothing", type=int, default=3)
+    parser.add_argument('--smoothnway', help="Apply rounding on n-way junctions (fillets will normally work better)", action='store_true')
+    parser.add_argument('--fillet', help="Add fillets on any corners that couldn't be rounded", action='store_true')
+    parser.add_argument('--teardrops', help="Add teardrops", action='store_true')
     args = parser.parse_args()
+    print(f'Loading board "{args.filename}"')
     board = Board()
     board.load(args.filename)
+    print(f"Subdividing tracks")
     for tracks in board.tracksByNetAndLayer.values():
-        if args.cornerarcs:
-            _, cornerArcSets = findIntersections(tracks)
-            splits = defaultdict(list)
-            addArcsBetweenTracks(cornerArcSets, board, splits, 
-                args.radius * 0.1, args.radiusWidthMultiplier, 
-                args.maxRadius * 0.1, args.minAngle,
-                checkIslands = False)
-            addArcsBetweenTracks([tracks], board, splits, 
-                args.radius * 0.1, args.radiusWidthMultiplier, 
-                args.maxRadius * 0.1, args.minAngle,
-                checkIslands = True)
-            applySplits(tracks, splits)
-        subdivideTracks(tracks, board, args.radius * 0.1, args.radiusWidthMultiplier, args.maxRadius * 0.1,
-                        args.minAngle, args.minLength * 0.1, args.iterations)
+        net = tracks[0].net
+        vias = board.viasByNet.get(net, [])
+        subdivideTracks(tracks, vias, board, args)
+    if args.fillet:
+        print(f"Applying fillets")
+        for tracks in board.tracksByNetAndLayer.values():
+            filletTracks(tracks, board, args)
+    if args.teardrops:
+        print(f"Applying teardrops")
+        for tracks in board.tracksByNetAndLayer.values():
+            vias = board.viasByNet.get(tracks[0].net, [])
+            SetTeardrops(board, tracks, vias)
+
     outname = args.outputfile
     if not outname:
         name, ext = os.path.splitext(args.filename)
         outname = name + '_smoothed' + ext
+    print(f'Saving board "{outname}"')
     board.save(outname)
 
 if __name__ == '__main__':
