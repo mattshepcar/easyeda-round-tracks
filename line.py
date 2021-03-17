@@ -9,6 +9,8 @@ class Vector(namedtuple('Vector', 'x y')):
         return Vector(self.x - other.x, self.y - other.y)
     def __mul__(self, other):
         return Vector(self.x * other, self.y * other)
+    def __truediv__(self, other):
+        return self * (1.0 / other)
 
 def dot(p0, p1):
     return p0.x * p1.x + p0.y * p1.y
@@ -20,18 +22,12 @@ def length(p):
     return math.sqrt(lengthsq(p))
 def clamp(x, minx, maxx):
     return max(minx, min(x, maxx))
-def add(p0, p1):
-    return Vector(p0.x + p1.x, p0.y + p1.y)
-def sub(p0, p1):
-    return Vector(p0.x - p1.x, p0.y - p1.y)
 def distsq(p0, p1):
-    return lengthsq(sub(p0, p1))
+    return lengthsq(p0 - p1)
 def dist(p0, p1):
-    return length(sub(p0, p1))
-def scale(v, factor):
-    return Vector(v.x * factor, v.y * factor)
+    return length(p0 - p1)
 def normalize(v):
-    return scale(v, 1.0 / length(v))
+    return v / length(v)
 
 class Line:
     def __init__(self, p0, p1):
@@ -39,14 +35,12 @@ class Line:
         self.end = p1 if isinstance(p1, Vector) else Vector(*p1)
         self.update()
     def update(self):
-        d = sub(self.end, self.start)
+        d = self.end - self.start
         self.length = length(d)
         if self.length < 0.0001:
             return False
-        self.dir = scale(d, 1.0 / self.length)
+        self.dir = d / self.length
         return True
-    def GetWidth(self):
-        return self.width
     def angle(self):
         return math.atan2(self.dir.y, self.dir.x)
         #return math.copysign(1 - self.dir.x / (abs(self.dir.x) + abs(self.dir.y)), self.dir.y)
@@ -62,7 +56,7 @@ class Line:
     def pointOnLine(self, d):
         return Vector(self.start.x + self.dir.x * d, self.start.y + self.dir.y * d)
     def projectedLength(self, p, bounded=True):
-        d = dot(self.dir, sub(p, self.start))
+        d = dot(self.dir, p - self.start)
         return clamp(d, 0, self.length) if bounded else d
     def closestPoint(self, p, bounded=True):
         return self.pointOnLine(self.projectedLength(p, bounded))
@@ -77,17 +71,17 @@ class Line:
         return newTrack
     def bounds(self, expand=0):
         w = self.width * .5 + expand
-        return (Vector(min(self.start.x, self.end.x) - w, min(self.start.y, self.end.y - w)),
+        return (Vector(min(self.start.x, self.end.x) - w, min(self.start.y, self.end.y) - w),
                 Vector(max(self.start.x, self.end.x) + w, max(self.start.y, self.end.y) + w))
 
 def intersect(t0, t1, bound0=True, bound1=True):
     t1perp = Vector(t1.end.y - t1.start.y, t1.start.x - t1.end.x)
-    t0vec = sub(t0.end, t0.start)
+    t0vec = t0.end - t0.start
     t0proj = dot(t0vec, t1perp)
     if abs(t0proj) < 1e-4:
         return None
     t0perp = Vector(t0.end.y - t0.start.y, t0.start.x - t0.end.x)
-    t0t1 = sub(t1.start, t0.start)
+    t0t1 = t1.start - t0.start
     d1 = dot(t0t1, t1perp) / t0proj
     if bound0 and (d1 < -1e-4 or d1 > 1.0 + 1e-4):
         return None
@@ -101,8 +95,8 @@ def isParallel(t, t2):
     return abs(dot(t.dir, t2.dir)) > 0.9999
 
 def isColinear(t, t2):
-    ds = sub(t2.start, t.start)
-    de = sub(t2.end, t.start)
+    ds = t2.start - t.start
+    de = t2.end - t.start
     return abs(ds.x * de.y - ds.y * de.x) < 0.0001
 
 def cleanupColinearTrackPair(t, t2, tracks):
@@ -111,7 +105,9 @@ def cleanupColinearTrackPair(t, t2, tracks):
     if not isParallel(t, t2):
         return False
     # same width and same direction?
-    if t.width == t2.width and isColinear(t, t2):
+    if t.width == t2.width:
+        if not isColinear(t, t2):
+            return False
         s = t.projectedLength(t2.start, bounded=False)
         e = t.projectedLength(t2.end, bounded=False)
         if s > e:
@@ -126,36 +122,39 @@ def cleanupColinearTrackPair(t, t2, tracks):
             t2.update()
             tracks.remove(t)
             return True
-    elif t.width < t2.width:
-        if t2.distanceTo(t.start, bounded=False) < t2.width - t.width + 0.0001:
-            s = t2.projectedLength(t.start, bounded=False)
-            e = t2.projectedLength(t.end, bounded=False)
-            if e < s:
-                s, e = e, s
-                t.reverse()
-            overlap = (t2.width - t.width) * .5
-            if s < -overlap:
-                # we have a line segment before
-                if e > t2.length + overlap:
-                    # split the line
-                    endseg = copy(t)
-                    endseg.start = t.closestPoint(t2.pointOnLine(t2.length + overlap))
-                    endseg.end = copy(t.end)
-                    endseg.update()
-                    tracks.append(endseg)
-                if e > 0.0:
-                    # clip the line to the start of the other line
-                    t.end = t.closestPoint(t2.pointOnLine(-overlap))
-                    t.update()
-            elif e > t2.length + overlap:
-                if s < t2.length + overlap:
-                    # clip the line to the end of the other line
-                    t.start = t.closestPoint(t2.pointOnLine(t2.length + overlap))
-                    t.update()
-            else:
-                # remove the line segment altogether
-                tracks.remove(t)
-                return True
+    else:
+        if t2.width < t.width:
+            t, t2 = t2, t
+        if t2.distanceTo(t.start, bounded=False) >= t2.width - t.width + 0.0001:
+            return False
+        s = t2.projectedLength(t.start, bounded=False)
+        e = t2.projectedLength(t.end, bounded=False)
+        if e < s:
+            s, e = e, s
+            t.reverse()
+        overlap = (t2.width - t.width) * .5
+        if s < -overlap:
+            # we have a line segment before
+            if e > t2.length + overlap:
+                # split the line
+                endseg = copy(t)
+                endseg.start = t.closestPoint(t2.pointOnLine(t2.length + overlap))
+                endseg.end = copy(t.end)
+                endseg.update()
+                tracks.append(endseg)
+            if e > 0.0:
+                # clip the line to the start of the other line
+                t.end = t.closestPoint(t2.pointOnLine(-overlap))
+                t.update()
+        elif e > t2.length + overlap:
+            if s < t2.length + overlap:
+                # clip the line to the end of the other line
+                t.start = t.closestPoint(t2.pointOnLine(t2.length + overlap))
+                t.update()
+        else:
+            # remove the line segment altogether
+            tracks.remove(t)
+            return True
     return False
 
 def distFromEnd(t, p):
@@ -189,8 +188,6 @@ def splitIntersectingLines(tracks):
             if (t.start == t2.start or t.start == t2.end or
                 t.end == t2.start or t.end == t2.end):
                 continue
-            #if distFromEnd(t, t2.start) == 0 or distFromEnd(t, t2.end) == 0:
-            #    continue
             ip = intersect(t, t2, bound0=False)
             if not ip:
                 continue
@@ -231,7 +228,6 @@ def splitIntersectingLines(tracks):
 
 class Island:
     def __init__(self):
-        self.id = id(self)
         self.tracks = []
     def add(self, other, islands):
         for t in other.tracks:
@@ -295,7 +291,7 @@ def makePolyLines(lines):
 
 KdNode = namedtuple("KdNode", "pos left right")
 def kdtree(points, depth = 0):
-    if len(points) < 4:
+    if len(points) <= 4:
         return points
     points.sort(key=lambda p: p[0][depth & 1])
     median = len(points) // 2
@@ -333,7 +329,7 @@ def kdinside(tree, bounds, depth = 0):
 
 KdBoxNode = namedtuple("KdBoxNode", "maxleft minright left right")
 def kdboxtree(boxes, depth = 0):
-    if len(boxes) < 4:
+    if len(boxes) <= 4:
         return boxes
     boxes.sort(key=lambda p: p[0][0][depth & 1] + p[0][1][depth & 1])
     median = len(boxes) // 2
@@ -354,8 +350,3 @@ def kdboxinside(tree, bounds, depth = 0):
     return [obj for (objmin, objmax), obj in tree 
                 if objmin[0] <= maxpos[0] and objmax[0] >= minpos[0] and 
                    objmin[1] <= maxpos[1] and objmax[1] >= minpos[1]]
-
-
-def kdnearest(tree, pos, maxDistance):
-    points = kdnear(tree, pos, maxDistance)
-    return points[0] if points else None

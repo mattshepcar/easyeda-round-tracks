@@ -1,6 +1,6 @@
 import pyclipper
 from board import Board, floatToString, pointToStr
-from line import makePolyLines, Line, Vector, dot, add, scale
+from line import makePolyLines, Line, Vector, dot
 from collections import defaultdict
 import math
 
@@ -18,6 +18,9 @@ def unionPolygons(polys):
     return clipper.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO)
 
 def filletTracks(tracks, board, args):
+    # combine all the tracks into a minimum set of polygons then 
+    # add fillets to any suitable interior corners. 
+    # TODO: include pads, arcs & solid regions?
     clipperScale = 100.0
     net, layer = tracks[0].net, tracks[0].layer
     tracksByWidth = defaultdict(list)
@@ -25,6 +28,7 @@ def filletTracks(tracks, board, args):
         tracksByWidth[t.width].append(t)
     minWidthAtPoint = {}
     combinedPolys = []
+    # start with widest tracks first to ensure that minWidthAtPoint ends up with the minimum widths
     for width, tracks in sorted(tracksByWidth.items(), reverse=True):
         polys = []
         for polyline in makePolyLines(tracks):
@@ -40,9 +44,8 @@ def filletTracks(tracks, board, args):
         minWidthAtPoint.update(((p[0], p[1]), width) for poly in intersection for p in poly)
         # add to the final combined poly
         combinedPolys = unionPolygons(combinedPolys + intersection)
-    maxCosTheta = math.cos(math.radians(args.minAngle))
+    maxCosTheta = math.cos(math.radians(args.minAngle + 2))
 
-    #maxCosTheta = math.cos(math.radians(15)) # todo
     minLength = int(args.minLength * 0.1 * clipperScale)
     maxCosThetaSq = maxCosTheta * maxCosTheta
     # check against double the min length because the subdivision algorithm
@@ -113,16 +116,16 @@ def filletTracks(tracks, board, args):
             # choose smallest track width at this point for the arc
             w = minWidthAtPoint[(l0.start.x, l0.start.y)]
             # offset into polygon by arc width
-            l0.end = add(l0.pointOnLine(fillet), l0.vecToEdge(-w * clipperScale))
-            l1.end = add(l1.pointOnLine(fillet), l1.vecToEdge(w * clipperScale))
+            l0.end = l0.pointOnLine(fillet) + l0.vecToEdge(-w * clipperScale)
+            l1.end = l1.pointOnLine(fillet) + l1.vecToEdge(w * clipperScale)
             # calculate arc radius from fillet length & intersection angle
             cos2t = .5 + .5 * dot(l0.dir, l1.dir) # half angle formula
-            r = math.sqrt(fillet * fillet * (1 - cos2t) / cos2t)
+            r = fillet * math.sqrt(1 / cos2t - 1)
             # account for the arc width
             r += w * clipperScale * .5 
             # add the arc
             r = floatToString(round(r / clipperScale, 5))
             w = floatToString(w)
-            p0 = pointToStr(scale(l0.end, 1.0 / clipperScale))
-            p1 = pointToStr(scale(l1.end, 1.0 / clipperScale))
+            p0 = pointToStr(l0.end / clipperScale)
+            p1 = pointToStr(l1.end / clipperScale)
             board.addShape(f"ARC~{w}~{layer}~{net}~M {p0} A {r} {r} 0 0 0 {p1}~~{board.getShapeId()}~0")

@@ -1,5 +1,5 @@
 import json
-from line import Line, Vector, cleanupColinearTrackPair, splitIntersectingLines, getIslands, makePolyLines, dist
+from line import Line, Vector, cleanupColinearTrackPair, splitIntersectingLines, getIslands, makePolyLines, dist, kdboxtree, kdboxinside
 from copy import copy
 from collections import defaultdict, namedtuple
 import math
@@ -20,8 +20,8 @@ class Board:
         self.nextTrackId = 0
         self.board = json.load(open(filename, encoding='utf-8'))
         self.loadTracks()
-        #print("Cleaning up overlapping tracks")
-        #self.cleanupColinearTracks()
+        print("Cleaning up overlapping tracks")
+        self.cleanupColinearTracks()
         print("Splitting intersecting tracks")
         self.splitIntersectingLines()
         print("Identifying connected track sections")
@@ -30,14 +30,16 @@ class Board:
     def save(self, filename):
         self.saveTracks()
         with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(self.board, f, indent=2, sort_keys=False,ensure_ascii=False)
+            json.dump(self.board, f, indent=2, sort_keys=False, ensure_ascii=False)
 
     def cleanupColinearTracks(self):
         for tracks in self.tracksByNetAndLayer.values():
+            #trackLookup = kdboxtree(list((t.bounds(), t) for t in tracks))
             for t in tracks:
-                for t2 in tracks:
-                    if cleanupColinearTrackPair(t, t2, tracks):
-                        break
+                for t2 in tracks: #kdboxinside(trackLookup, t.bounds()):
+                    if 1: #id(t) < id(t2): doens't work???
+                        if cleanupColinearTrackPair(t, t2, tracks):
+                            break
 
     def splitIntersectingLines(self):
         for tracks in self.tracksByNetAndLayer.values():

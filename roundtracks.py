@@ -3,10 +3,15 @@ from board import Board, floatToString
 import math
 from copy import copy
 from collections import defaultdict
-from line import Line, Vector, dist, add, sub, dot, cross, intersect, applySplits, kdtree, kdnear, kdinside
+from line import Line, Vector, dist, dot, cross, intersect, applySplits, kdtree, kdnear, kdinside
 from fillettracks import filletTracks
 from teardrops import SetTeardrops
 import os
+
+# todo: 
+# check for fillets first and share space with subdivision rounding
+#  - see 5V end stop junction on print head board
+# rectangular pad teardrops?    
 
 def subdivideTracks(tracks, vias, board, args):
     maxCosTheta = math.cos(math.radians(args.minAngle))
@@ -51,8 +56,8 @@ def subdivideTracks(tracks, vias, board, args):
             shortestTrackLen = min(t.originalLength for t in tracksHere)
             for t in range(len(tracksHere)):
                 t0, t1 = tracksHere[t - 1], tracksHere[t]
-                cosHalfTheta = math.sqrt(.5 + .5 * abs(dot(t0.dir, t1.dir)))
                 r = min(maxRadius, radius + args.radiusWidthMultiplier * t0.width, t0.length - minLength)
+                cosHalfTheta = math.sqrt(.5 + .5 * abs(dot(t0.dir, t1.dir)))
                 amountToShorten = min(shortestTrackLen / (2 * cosHalfTheta + 2), r)
                 if amountToShorten >= minLength:
                     t0.length -= amountToShorten
@@ -146,21 +151,20 @@ def main():
     board = Board()
     board.load(args.filename)
     if not args.nosubdivide:
-        print(f"Subdividing tracks")
+        print("Subdividing tracks")
         for tracks in board.tracksByNetAndLayer.values():
             net = tracks[0].net
             vias = board.viasByNet.get(net, [])
             subdivideTracks(tracks, vias, board, args)
     if not args.nofillet:
-        print(f"Applying fillets")
+        print("Applying fillets")
         for tracks in board.tracksByNetAndLayer.values():
             filletTracks(tracks, board, args)
     if not args.noteardrops:
-        print(f"Applying teardrops")
+        print("Applying teardrops")
         for tracks in board.tracksByNetAndLayer.values():
             vias = board.viasByNet.get(tracks[0].net, [])
             SetTeardrops(board, tracks, vias, args)
-
     outname = args.outputfile
     if not outname:
         name, ext = os.path.splitext(args.filename)
