@@ -73,7 +73,7 @@ function __ComputeCurved(vpercent, w, trackDir, via, pts, segs) {
     } else {
         curve1 = __Bezier(pts[1], tangentB, tangentC, pts[2], n=segs);
         curve2 = __Bezier(pts[4], tangentE, tangentA, pts[0], n=segs);
-        return pointsToPath(curve1.concat([pts[3]]).concat(curve2));
+        return curve1.concat([pts[3]]).concat(curve2);
     }
 }
 
@@ -177,10 +177,10 @@ function __ComputePoints(track, via, hpercent, vpercent, segs, trackLookup) {
     if (segs > 2)
         return __ComputeCurved(vpercent, w, trackDir, via, pts, segs);
     else
-        return pointsToPath(pts);
+        return pts;
 }
 
-function SetTeardrops(pcb, tracks, vias, args) {
+function SetTeardrops(pcb, tracks, vias, args, teardrops=null) {
     // Set teardrops on a teardrop free board
     const hpercent = args.teardropLength;
     const vpercent = args.teardropWidth;
@@ -204,6 +204,7 @@ function SetTeardrops(pcb, tracks, vias, args) {
 
     //tracks = tracks.map(t => [t.start, t]).concat(tracks.map(t => [t.end, t]));
     //tracks = kdtree(tracks);
+
     for(const via of vias) {
         const r = via.diameter * .5;
         const rsq = r * r;
@@ -215,9 +216,28 @@ function SetTeardrops(pcb, tracks, vias, args) {
                 if (t.width < via.diameter * .95) {
                     // is the track entering/leaving the via?
                     if ((distsq(t.start, via.pos) < rsq) != (distsq(t.end, via.pos) < rsq)) {
-                        const path = __ComputePoints(t, via, hpercent, vpercent, segs, trackLookup);
-                        if (path != null)
-                            pcb.addShape(`SOLIDREGION~${t.layer}~${t.net}~${path}~solid~${pcb.allocateShapeId()}~~~~0`);
+                        const pts = __ComputePoints(t, via, hpercent, vpercent, segs, trackLookup);
+                        if (pts != null) {
+                            if (teardrops != null)
+                            {
+                                teardrops.push({
+                                    shapeType: "SOLIDREGION",
+                                    jsonCache: {
+                                        layerid: t.layer,
+                                        net: t.net,
+                                        type: "solid",
+                                        teardrop: 1,
+                                        targetPad: via.id,
+                                        targetWire: t.id,
+                                        pathStr: pointsToPath(pts)
+                                    }
+                                });
+                            }
+                            else
+                            {
+                                pcb.addShape(`SOLIDREGION~${t.layer}~${t.net}~${pointsToPath(pts)}~solid~${pcb.allocateShapeId()}~1~${t.id}~${via.id}~0`);
+                            }
+                        }
                     }
                 }
             }

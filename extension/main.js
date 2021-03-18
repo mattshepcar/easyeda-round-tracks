@@ -44,6 +44,7 @@ api('createToolbarButton', {
 						const vias = board.viasByNet[net] || [];
 						RoundTracks(tracks, vias, board, args);
 					}
+					board.saveTracks();
 				}
 				if (!args.nofillet) {
 					console.log("Applying fillets");
@@ -53,15 +54,34 @@ api('createToolbarButton', {
 				}
 				if (!args.noteardrops) {
 					console.log("Applying teardrops");
+					board.removeTeardrops();
 					for(const tracks of Object.values(board.tracksByNetAndLayer)) {
 						const net = tracks[0].net;
 						const vias = board.viasByNet[net] || [];
 						SetTeardrops(board, tracks, vias, args);
 					}
 				}
-				api('applySource',{source: board.save(), createNew: true});
+				api('applySource',{source: JSON.stringify(board.board, null, 2), createNew: true});
 			}),
 			title: 'Apply smoothing algorithm to PCB tracks',
+		},
+		{
+			text: "Add teardrops",
+			cmd: createCommand(()=>{
+				var json = api('getSource', {type: "json"});
+				console.log(json);
+				board = new Board(api('getSource', {type:'compress'}));
+				teardrops = [];
+				for(const tracks of Object.values(board.tracksByNetAndLayer)) {
+					const net = tracks[0].net;
+					const vias = board.viasByNet[net] || [];
+					SetTeardrops(board, tracks, vias, args, teardrops);
+					//FilletTracks(tracks, board, args, teardrops);
+				}
+				api('delete', {ids: board.teardrops});
+				api('createShape', teardrops);   
+			}),
+			title: 'Add teardrops to vias and pads',
 		},
 		{
 			text: "About", 

@@ -14,10 +14,11 @@ function pointToStr(pt) {
 }
 
 class Via {
-    constructor(pos, diameter, holeRadius) {
+    constructor(pos, diameter, holeRadius, shapeId) {
         this.pos = pos;
         this.diameter = diameter;
         this.holeRadius = holeRadius;
+        this.id = shapeId;
     }
 }
 class Board {
@@ -32,11 +33,6 @@ class Board {
         this.splitIntersectingLines();
         console.log("Identifying connected track sections");
         this.assignIslands();
-    }
-
-    save(filename) {
-        this.saveTracks();
-        return JSON.stringify(this.board, null, 2);
     }
 
     cleanupColinearTracks() {
@@ -69,14 +65,16 @@ class Board {
     }
 
     addShape(shape) {
-        this.board['shape'].push(shape);
+        this.board.shape.push(shape);
     }
 
     loadTracks() {
         this.highestShapeId = 0;
         this.tracksByNetAndLayer = {};
         this.viasByNet = {};
-        this.loadShapes(this.board['shape']);
+        this.teardrops = [];
+        this.teardropIndices = [];
+        this.loadShapes(this.board.shape);
     }
 
     loadShapes(shapes) {
@@ -119,7 +117,7 @@ class Board {
                 const pos = new Point(Number(x), Number(y));
                 if (!(net in this.viasByNet))
                     this.viasByNet[net] = [];
-                this.viasByNet[net].push(new Via(pos, Number(diameter), Number(drill)));
+                this.viasByNet[net].push(new Via(pos, Number(diameter), Number(drill), shapeId));
              } else if (shape[0] == 'PAD') {
                 const [, shapeType, x, y, w, h, layer, net, num, holeRadius, points, 
                  rotation, _shapeId, holeLength, holePoints, plated, locked, 
@@ -129,7 +127,13 @@ class Board {
                 if (Number(holeRadius)) {
                     if (!(net in this.viasByNet))
                         this.viasByNet[net] = [];    
-                    this.viasByNet[net].push(new Via(pos, Math.min(Number(w), Number(h)), Number(holeRadius)));
+                    this.viasByNet[net].push(new Via(pos, Math.min(Number(w), Number(h)), Number(holeRadius), shapeId));
+                }
+            } else if (shape[0] == 'SOLIDREGION') {
+                const [, layer, net, path, type, shapeId, teardrop, targetWire, targetPad] = shape;
+                if (teardrop) {
+                    this.teardrops.push(shapeId);
+                    this.teardropIndices.push(shapeIndex);
                 }
             } else {
                 for(const field of shape) {
@@ -144,6 +148,12 @@ class Board {
                 if (numericId > this.highestShapeId)
                     this.highestShapeId = numericId;
             }
+        }
+    }
+
+    removeTeardrops() {
+        while(this.teardropIndices.length) {
+            this.board.shape.splice(this.teardropIndices.pop(), 1);
         }
     }
 

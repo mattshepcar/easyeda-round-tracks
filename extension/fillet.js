@@ -10,7 +10,8 @@ function makeTrackPath(track, width) {
     return offsetStroke(new Path(track), width * .5, {join: 'round', cap: 'round'});
 }
 
-function FilletTracks(tracks, board, args) {
+function FilletTracks(tracks, board, args, teardrops = null) {
+    const useArcs = (teardrops == null);
     // combine all the tracks into a minimum set of polygons then 
     // add fillets to any suitable interior corners. 
     // TODO: include pads, arcs & solid regions?
@@ -128,21 +129,46 @@ function FilletTracks(tracks, board, args) {
             l0 = new Line(seg.point, seg.previous.point);
             l1 = new Line(seg.point, seg.next.point);
             // choose smallest track width at this point for the arc
-            var w = minWidthAtPoint[seg.point];
+            var w = useArcs ? minWidthAtPoint[seg.point] : 0;
             // offset into polygon by arc width
             l0.end = l0.pointOnLine(fillet).add(l0.vecToEdge(-w));
             l1.end = l1.pointOnLine(fillet).add(l1.vecToEdge(w));
             // calculate arc radius from fillet length & intersection angle
             const cos2t = .5 + .5 * dot(l0.dir, l1.dir); // half angle formula
             var r = fillet * Math.sqrt(1 / cos2t - 1);
+            p0 = pointToStr(l0.end);
+            p1 = pointToStr(l1.end);
             // account for the arc width
-            r += w * .5; 
+            if (useArcs) 
+                r += w * .5;
             // add the arc
             r = floatToString(r);
             w = floatToString(w)
-            p0 = pointToStr(l0.end)
-            p1 = pointToStr(l1.end)
-            board.addShape(`ARC~${w}~${layer}~${net}~M ${p0} A ${r} ${r} 0 0 0 ${p1}~~${board.allocateShapeId()}~0`);
+            var path = `M ${p0} A ${r} ${r} 0 0 0 ${p1}`;
+            if (useArcs) {
+                board.addShape(`ARC~${w}~${layer}~${net}~${path}~~${board.allocateShapeId()}~0`);
+            }
+            else {
+                path += ` L ${pointToStr(l0.start)} Z`;
+                if (teardrops != null)
+                {
+                    teardrops.push({
+                        shapeType: "SOLIDREGION",
+                        jsonCache: {
+                            layerid: layer,
+                            net: net,
+                            type: "solid",
+                            teardrop: 1,
+                            //pointArr: pts,
+                            pathStr: path
+                        }
+                    });
+                }
+                else
+                {
+                    pcb.addShape(`SOLIDREGION~${layer}~${net}~${path}~solid~${pcb.allocateShapeId()}~1~~~0`);
+                }
+            }
         }
     }
 }
