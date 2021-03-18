@@ -80,7 +80,7 @@ function __FindTouchingTrack(t1, endpoint, trackLookup) {
     if (!(endpoint in trackLookup))
         return null;
     const touchingTracks = trackLookup[endpoint][1];
-    if (touchingTracks.length > 2 || touchingTracks.includes(t1))
+    if (touchingTracks.length > 2 || !touchingTracks.includes(t1))
         return null;
     for(const t of touchingTracks)
         if (t != t1)
