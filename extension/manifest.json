@@ -1,0 +1,19 @@
+{
+	"name": "Smooth Tracks",
+	"description": "Create nice curved tracks on your PCBs",
+	"version": "1.0",
+	"homepage": "https://github.com/mattshepcar/easyeda-scripts",
+	"icons": {
+		"default": "icon.svg"
+	},
+	"scripts": [ 
+		"paper-full.min.js",
+		"paperjs-offset.min.js",
+		"line.js",
+		"board.js",
+		"roundtracks.js",
+		"fillet.js",
+		"teardrops.js",
+		"main.js" 
+	]
+}
