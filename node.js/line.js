@@ -59,18 +59,18 @@ class Line {
     pointOnLine(d) {
         return this.start.add(this.dir.multiply(d));
     }
-    projectedLength(p, bounded=True) {
+    projectedLength(p, bounded=true) {
         const d = dot(this.dir, p.subtract(this.start));
         return bounded ? clamp(d, 0, this.length) : d;
     }
-    closestPoint(p, bounded=True) {
+    closestPoint(p, bounded=true) {
         return this.pointOnLine(this.projectedLength(p, bounded));
     }
     distanceTo(p, bounded=true) {
         return dist(p, this.closestPoint(p, bounded));
     }
     split(p) {
-        newTrack = this.clone();
+        var newTrack = this.clone();
         newTrack.start = p;
         newTrack.update();
         this.end = p;
@@ -107,7 +107,7 @@ function intersect(t0, t1, bound0=true, bound1=true) {
 }
 
 function isParallel(t, t2) {
-    return abs(dot(t.dir, t2.dir)) > 0.9999;
+    return Math.abs(dot(t.dir, t2.dir)) > 0.9999;
 }
 
 function isColinear(t, t2) {
@@ -137,7 +137,7 @@ function cleanupColinearTrackPair(t, t2, tracks) {
             t2.start = t.pointOnLine(s);
             t2.end  = t.pointOnLine(e);
             t2.update();
-            tracks.remove(t);
+            tracks.splice(tracks.indexOf(t), 1);
             return true;
         }
     } else {
@@ -175,7 +175,7 @@ function cleanupColinearTrackPair(t, t2, tracks) {
             }
         } else {
             // remove the line segment altogether
-            tracks.remove(t)
+            tracks.splice(tracks.indexOf(t), 1);
             return true;
         }
     }
@@ -197,7 +197,7 @@ function splitLineIfEndIntersects(t, t2) {
 
 function applySplits(tracks, splits) {
     // split each track at desired split points
-    for(const [t, dists] of Object.items(splits)) {
+    for(const [t, dists] of Object.values(splits)) {
         dists.sort().reverse();
         for(const d of dists) 
             if (d > 0.0 && d < t.length)
@@ -206,10 +206,10 @@ function applySplits(tracks, splits) {
 }
 
 function splitIntersectingLines(tracks) {
-    var trackLookup = kdboxtree(tracks.map(t=>[t.bounds(), t]));
+    //var trackLookup = kdboxtree(tracks.map(t=>[t.bounds(), t]));
     var needUpdate = false;
     for(const t2 of tracks) {
-        for(const t of kdboxinside(trackLookup, t2.bounds())) {
+        for(const t of tracks) { //kdboxinside(trackLookup, t2.bounds())) {
             if (t == t2)
                 continue;
             if (t.width != t2.width)
@@ -235,15 +235,17 @@ function splitIntersectingLines(tracks) {
             }
         }
     }
-    if (needUpdate)
-        trackLookup = kdboxtree(tracks.map(t=>[t.bounds(), t]));
+    //if (needUpdate)
+    //    trackLookup = kdboxtree(tracks.map(t=>[t.bounds(), t]));
     mindist = 0.1
 
-    splits = defaultdict(list)
+    splits = new Map();
     for(const t of tracks) {
-        for(const t2 of kdboxinside(trackLookup, t2.bounds())) {
-            if (id(t) <= id(t2))
+        for(const t2 of tracks) { //kdboxinside(trackLookup, t2.bounds())) {
+            if (t == t2)
                 continue;
+            //if (id(t) <= id(t2))
+            //    continue;
             if (t.width != t2.width)
                 continue;
             const ip = intersect(t, t2);
@@ -256,7 +258,11 @@ function splitIntersectingLines(tracks) {
                         s.end = ip;
                         s.update();
                     } else {
-                        splits[s].push(s.projectedLength(ip));
+                        k = s.start+'-'+s.end
+                        if (k in splits)
+                            splits[k][1].push(s.projectedLength(ip));
+                        else
+                            splits[k] = [s, [s.projectedLength(ip)]];
                     }
                 }
             }
@@ -280,10 +286,10 @@ class Island {
 }
 
 function assignIslands(tracks) {
-    var islandsByWidth = {}
+    var islandsByWidth = new Map();
     for(const t of tracks) {
         if (!(t.width in islandsByWidth))
-            islandsByWidth[t.width] = {}
+            islandsByWidth[t.width] = new Map();
         islands = islandsByWidth[t.width]
         const startisland = islands[t.start]
         const endisland = islands[t.end]
@@ -459,16 +465,18 @@ function kdboxinside(tree, bounds, depth = 0) {
     const [minpos, maxpos] = bounds;
     if (tree instanceof KdBoxNode) {
         var objs = [];
-        if (tree.maxleft > minpos[depth & 1])
-            objs.push(...kdboxinside(tree.left, bounds, depth + 1));
-        if (tree.minright < maxpos[depth & 1])
-            objs.push(...kdboxinside(tree.right, bounds, depth + 1));
+        const mincoord = depth & 1 ? minpos.y : minpos.x;
+        if (tree.maxleft > mincoord)
+            objs = objs.concat(kdboxinside(tree.left, bounds, depth + 1));
+        const maxcoord = depth & 1 ? maxpos.y : maxpos.x;
+        if (tree.minright < maxcoord)
+            objs = objs.concat(kdboxinside(tree.right, bounds, depth + 1));
         return objs;
     }
     return tree.filter(([objmin, objmax], obj) => 
-                objmin[0] <= maxpos[0] && objmax[0] >= minpos[0] && 
-                objmin[1] <= maxpos[1] && objmax[1] >= minpos[1])
+                objmin.x <= maxpos.x && objmax.x >= minpos.x && 
+                objmin.y <= maxpos.y && objmax.y >= minpos.y)
                 .map(([, obj]) => obj);
 }
 
-module.exports = {dot, Line, dist, distsq, assignIslands, makePolyLines, kdtree, kdnear, kdtree2, kdnear2, kdinside, kdboxtree, kdboxinside};
+module.exports = {dot, Line, dist, distsq, assignIslands, makePolyLines, splitIntersectingLines, cleanupColinearTrackPair, kdtree, kdnear, kdtree2, kdnear2, kdinside, kdboxtree, kdboxinside};

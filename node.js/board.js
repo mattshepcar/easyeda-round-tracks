@@ -1,6 +1,6 @@
 const { writeFile } = require("fs");
 const { Point } = require("paper");
-const { Line, assignIslands, makePolyLines } = require("./line.js");
+const { Line, assignIslands, makePolyLines, cleanupColinearTrackPair, splitIntersectingLines } = require("./line.js");
 
 function floatToString(inputValue) {
     return inputValue;
@@ -23,10 +23,10 @@ class Board {
         this.nextTrackId = 0;
         this.board = JSON.parse(json);
         this.loadTracks();
-        //console.log("Cleaning up overlapping tracks");
-        //this.cleanupColinearTracks();
-        //console.log("Splitting intersecting tracks");
-        //this.splitIntersectingLines();
+        console.log("Cleaning up overlapping tracks");
+        this.cleanupColinearTracks();
+        console.log("Splitting intersecting tracks");
+        this.splitIntersectingLines();
         console.log("Identifying connected track sections");
         this.assignIslands();
     }
