@@ -15,9 +15,13 @@ Current there are just two menu options under the "Smooth Tracks" menu at the to
 1) Smooth Tracks.  This will apply smoothing to all the tracks on the top & bottom layers. Then it will create arcs on any t-junctions or areas where track smoothing could not be applied (e.g. where traces of differing widths intersect).  Finally it will add teardrops to vias and through hole pads.  The resultant board will be opened as a new document because the smoothing process is not reversible.
 2) Add Teardrops.  Any existing teardrops will be removed from the board and new ones added.  These can be removed by using the normal EasyEDA teardrops dialog if required.
 
-## Example
+## Examples
 
 This is the result of running "Smooth Tracks":
 ![output](docs/example1-smoothed.PNG)
 on this input board:
-![input](docs/example1-input.PNG) 
+![input](docs/example1-input.PNG)
+
+![example2](docs/example2-smoothed.png)
+
+![example3](docs/example3-smoothed.png)
