@@ -89,7 +89,7 @@ function FilletTracks(tracks, board, args) {
             // store the desired fillet size
             const w = minWidthAtPoint[seg.point]
             const fillet = .5 + w * .5;
-            fillets[fillets. length - 1] = Math.min(Math.sqrt(l0sq), Math.sqrt(l1sq), fillet);
+            fillets[fillets.length - 1] = Math.min(Math.sqrt(l0sq), Math.sqrt(l1sq), fillet);
             numFillets += 1;
         }
 
@@ -98,7 +98,7 @@ function FilletTracks(tracks, board, args) {
 
         // make sure fillets don't overlap
         if (numFillets > 1) {
-            for(const i in fillets) {
+            for(var i = 0; i < fillets.length; ++i) {
                 const f0 = fillets[i];
                 if (f0 <= 0.0)
                     continue;
@@ -106,10 +106,10 @@ function FilletTracks(tracks, board, args) {
                 const f1 = fillets[j];
                 if (f1 <= 0.0)
                     continue;
-                const len = dist(childPath.segments[i].next.point, childPath.segments[i].point);
+                const len = dist(childPath.segments[i].point, childPath.segments[j].point);
                 if (f0 + f1 > len) {
                     // halfway between the two fillet endpoints
-                    fillets[i] = (f0 + len - f1) * .5;
+                    fillets[i] = (f0 + (len - f1)) * .5;
                     fillets[j] = len - fillets[i];
                 }
             }
