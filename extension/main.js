@@ -78,8 +78,10 @@ api('createToolbarButton', {
 					SetTeardrops(board, tracks, vias, args, teardrops);
 					//FilletTracks(tracks, board, args, teardrops);
 				}
+				api('cacheHistory');
 				api('delete', {ids: board.teardrops});
 				api('createShape', teardrops);   
+				api('flushHistory');
 			}),
 			title: 'Add teardrops to vias and pads',
 		},
