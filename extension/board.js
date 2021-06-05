@@ -143,7 +143,7 @@ class Board {
                     }
                 }
             }
-            if (shapeId.startsWith('gge') && shape[0] != 'LIB') {
+            if (shapeId && shapeId.startsWith('gge') && shape[0] != 'LIB') {
                 const numericId = Number(shapeId.substr(3));
                 if (numericId > this.highestShapeId)
                     this.highestShapeId = numericId;
