@@ -3,7 +3,12 @@ extension = easyeda.extension.instances[extensionId];
 const {Point} = extension.paper;
 
 function dot(p0, p1) {
-    return p0.x * p1.x + p0.y * p1.y;
+    try {
+        return p0.x * p1.x + p0.y * p1.y;
+    }
+    catch {
+        return 0;
+    }
 }
 function cross(p0, p1) {
      return p0.x * p1.y - p0.y * p1.x;
@@ -21,7 +26,7 @@ function distsq(p0, p1) {
      return lengthsq(p0.subtract(p1));
 }
 function dist(p0, p1) {
-     return length(p0.subtract(p1));
+    return length(p0.subtract(p1));
 }
 function normalize(v) {
      return v / length(v);
@@ -68,7 +73,12 @@ class Line {
         return this.pointOnLine(this.projectedLength(p, bounded));
     }
     distanceTo(p, bounded=true) {
-        return dist(p, this.closestPoint(p, bounded));
+        try {
+            return dist(p, this.closestPoint(p, bounded));
+        }
+        catch {
+            return Infinity;
+        }
     }
     split(p) {
         var newTrack = this.clone();
