@@ -68,12 +68,24 @@ class Board {
         this.board.shape.push(shape);
     }
 
+    addSignalLayers(layers) {
+        for(const layer of layers) {
+            const fields = layer.split("~");
+            // Add layer id only if it's a custom signal layer
+            if (fields.pop() == "Signal") {
+                this.signalLayers.push(fields[0])
+            }
+        }
+    }
+
     loadTracks() {
         this.highestShapeId = 0;
         this.tracksByNetAndLayer = {};
         this.viasByNet = {};
         this.teardrops = [];
         this.teardropIndices = [];
+        this.signalLayers = ["1", "2"]; // TopLayer & BottomLayer
+        this.addSignalLayers(this.board.layers);
         this.loadShapes(this.board.shape);
     }
 
@@ -89,7 +101,7 @@ class Board {
             } else if (shape[0] == "TRACK") {
                 const [, widthStr, layer, net, coordsStr, _shapeId, locked] = shape;
                 shapeId = _shapeId;
-                if (layer == "1" || layer == "2") {
+                if (this.signalLayers.includes(layer)) {
                     const key = net+'~'+layer;
                     if (!(key in this.tracksByNetAndLayer))
                         this.tracksByNetAndLayer[key] = [];
@@ -111,14 +123,14 @@ class Board {
                             tracks.push(t);
                     }
                 }
-             } else if (shape[0] == 'VIA') {
+            } else if (shape[0] == 'VIA') {
                 const [, x, y, diameter, net, drill, _shapeId, locked] = shape;
                 shapeId = _shapeId;
                 const pos = new Point(Number(x), Number(y));
                 if (!(net in this.viasByNet))
                     this.viasByNet[net] = [];
                 this.viasByNet[net].push(new Via(pos, Number(diameter), Number(drill), shapeId));
-             } else if (shape[0] == 'PAD') {
+            } else if (shape[0] == 'PAD') {
                 const [, shapeType, x, y, w, h, layer, net, num, holeRadius, points, 
                  rotation, _shapeId, holeLength, holePoints, plated, locked, 
                  pasteExpansion, solderMaskExpansion] = shape;
