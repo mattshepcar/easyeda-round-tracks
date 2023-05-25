@@ -29,7 +29,7 @@ function FilletTracks(tracks, board, args, teardrops = null) {
     new Project;
     var path = new Path;
     tracksByWidth = Object.entries(tracksByWidth);
-    tracksByWidth.sort().reverse();
+    tracksByWidth.sort((a, b) => b[0] - a[0]);
     // start with widest tracks first to ensure that minWidthAtPoint ends up with the minimum widths
     for(const [,tracks] of tracksByWidth) {
         const width = tracks[0].width;
